@@ -5,6 +5,7 @@
     <!-- Location Permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Notification Permission (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -13,7 +14,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
-    <!-- Haptic feedback / Vibration -->
+    <!-- Wake lock to keep GPS tracking active when screen is turned off -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Boot completed to auto-restart service after phone restart -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Request ignore battery optimizations so OS does not kill background GPS -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Haptic feedback / Vibration & Audio -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
@@ -39,16 +49,29 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground Service for real-time proximity monitoring -->
+        <!-- Persistent Foreground Service for real-time proximity monitoring -->
         <service
             android:name=".service.LocationMonitoringService"
             android:foregroundServiceType="location"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <!-- Notification action handler receiver -->
         <receiver
             android:name=".receiver.NotificationActionReceiver"
             android:exported="false" />
+
+        <!-- Auto-restart service on device boot or update -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

@@ -147,8 +147,8 @@ object NotificationHelper {
 
         return NotificationCompat.Builder(context, GeoTaskApplication.CHANNEL_MONITOR)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("GeoTask • Proximity Guard Active")
-            .setContentText("Monitoring $activeCount location reminder(s) | GPS: $lastKnownCoords")
+            .setContentTitle("GeoTask Location Guard Active")
+            .setContentText("Monitoring $activeCount destination(s) | GPS: $lastKnownCoords")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(openPendingIntent)

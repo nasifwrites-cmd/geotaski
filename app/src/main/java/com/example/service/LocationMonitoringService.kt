@@ -1,6 +1,8 @@
 package com.example.service
 
 import android.annotation.SuppressLint
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -12,6 +14,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.example.GeoTaskApplication
@@ -37,20 +41,26 @@ class LocationMonitoringService : Service() {
     private var locationCallback: LocationCallback? = null
     private var locationManager: LocationManager? = null
     private var nativeLocationListener: LocationListener? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
-    // Tracking state for each reminder (was inside previously)
+    // Track state for each reminder
     private val previousInsideState = mutableMapOf<Long, Boolean>()
 
     override fun onCreate() {
         super.onCreate()
         _isServiceRunning.value = true
-        startForegroundWithNotification(0, "Initializing...")
-        setupLocationTracking()
+
+        // Acquire WakeLock so CPU keeps processing GPS even when screen is locked/off
+        acquireWakeLock()
+
+        startForegroundWithNotification(0, "Active")
+        setupHighFrequencyLocationTracking()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP_SERVICE -> {
+                releaseWakeLock()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -65,7 +75,58 @@ class LocationMonitoringService : Service() {
                 processLocationUpdate(mockLoc)
             }
         }
+        // START_STICKY ensures OS automatically recreates service if killed
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // When user swipes away / closes app from Recent Apps, restart service immediately
+        try {
+            val restartServiceIntent = Intent(applicationContext, LocationMonitoringService::class.java).apply {
+                action = ACTION_START_SERVICE
+            }
+            val restartPendingIntent = PendingIntent.getService(
+                applicationContext,
+                101,
+                restartServiceIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            alarmManager?.set(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 1000L,
+                restartPendingIntent
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not schedule service restart: ${e.message}")
+        }
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = powerManager?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "GeoTask::PersistentLocationWakeLock"
+            )?.apply {
+                setReferenceCounted(false)
+                acquire(24 * 60 * 60 * 1000L) // Safe 24-hour lease
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "WakeLock error: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wakeLock = null
+        } catch (e: Exception) {
+            Log.w(TAG, "WakeLock release error: ${e.message}")
+        }
     }
 
     private fun startForegroundWithNotification(activeCount: Int, coords: String) {
@@ -82,16 +143,23 @@ class LocationMonitoringService : Service() {
         }
     }
 
+    /**
+     * Configures ultra-fast, high-precision GPS tracking (1 second interval, 0m distance filter)
+     * so that arriving at 5m, 10m, 15m, 20m triggers the alarm immediately.
+     */
     @SuppressLint("MissingPermission")
-    private fun setupLocationTracking() {
+    private fun setupHighFrequencyLocationTracking() {
         try {
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
             val locationRequest = LocationRequest.Builder(
                 Priority.PRIORITY_HIGH_ACCURACY,
-                5000L // update every 5 seconds
+                1000L // update every 1 second!
             ).apply {
-                setMinUpdateIntervalMillis(3000L)
-                setMinUpdateDistanceMeters(5f)
+                setMinUpdateIntervalMillis(500L) // Fastest update 500ms
+                setMinUpdateDistanceMeters(0f) // Sub-meter sensitivity
+                setMaxUpdateDelayMillis(1000L) // Deliver immediately, no batching
+                setWaitForAccurateLocation(false)
             }.build()
 
             locationCallback = object : LocationCallback() {
@@ -107,22 +175,26 @@ class LocationMonitoringService : Service() {
                 Looper.getMainLooper()
             )
 
-            // Also request last known location immediately
+            // Request last known position immediately
             fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
                 if (location != null) {
                     processLocationUpdate(location)
                 }
             }
+
+            // Also keep native GPS provider active as parallel fallback
+            setupNativeLocationListener()
+
         } catch (e: Exception) {
-            Log.e(TAG, "Fused location unavailable, falling back to LocationManager: ${e.message}")
-            fallbackToLocationManager()
+            Log.e(TAG, "Fused location setup error: ${e.message}")
+            setupNativeLocationListener()
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun fallbackToLocationManager() {
+    private fun setupNativeLocationListener() {
         try {
-            locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             nativeLocationListener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     processLocationUpdate(location)
@@ -133,25 +205,26 @@ class LocationMonitoringService : Service() {
                 override fun onProviderDisabled(provider: String) {}
             }
 
-            if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
+            val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+            if (isGpsEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    5000L,
-                    5f,
+                    1000L,
+                    0f,
                     nativeLocationListener as LocationListener,
                     Looper.getMainLooper()
                 )
-            } else if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
+            } else {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    5000L,
-                    5f,
+                    1000L,
+                    0f,
                     nativeLocationListener as LocationListener,
                     Looper.getMainLooper()
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register fallback LocationManager: ${e.message}")
+            Log.e(TAG, "Native location listener error: ${e.message}")
         }
     }
 
@@ -163,13 +236,11 @@ class LocationMonitoringService : Service() {
             val repository = GeoTaskApplication.instance.repository
             val reminders = repository.getActiveReminders()
 
-            // Update foreground service notification status
             startForegroundWithNotification(reminders.size, coordsText)
 
             val now = System.currentTimeMillis()
 
             for (reminder in reminders) {
-                // Check if snoozed
                 if (reminder.snoozedUntil != null && reminder.snoozedUntil > now) {
                     continue
                 }
@@ -187,18 +258,15 @@ class LocationMonitoringService : Service() {
                 val wasInside = previousInsideState[reminder.id] ?: false
 
                 if (reminder.triggerType == "ENTER") {
-                    // Trigger when user is inside the geofence
-                    // If not triggered recently (at least 5 minutes cooldown to avoid notification flood)
-                    val cooldownMs = 5 * 60 * 1000L
-                    val lastTriggered = reminder.lastTriggeredAt ?: 0L
-                    val cooldownPassed = (now - lastTriggered) > cooldownMs
+                    // Trigger alarm immediately as soon as user enters the radius!
+                    val isEnteringNow = !wasInside && isCurrentlyInside
+                    val isInsideNotTriggered = isCurrentlyInside && !reminder.isTriggered
 
-                    if (isCurrentlyInside && (!reminder.isTriggered || cooldownPassed)) {
+                    if (isEnteringNow || isInsideNotTriggered) {
                         triggerNotificationForReminder(reminder)
                         repository.updateTriggerStatus(reminder.id, isTriggered = true, timestamp = now)
                     }
                 } else if (reminder.triggerType == "EXIT") {
-                    // Trigger when user exits the geofence
                     if (wasInside && !isCurrentlyInside) {
                         triggerNotificationForReminder(reminder)
                         repository.updateTriggerStatus(reminder.id, isTriggered = true, timestamp = now)
@@ -219,6 +287,7 @@ class LocationMonitoringService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         _isServiceRunning.value = false
+        releaseWakeLock()
         locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
         nativeLocationListener?.let { locationManager?.removeUpdates(it) }
         serviceScope.cancel()
