@@ -6,10 +6,11 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.data.model.GeoReminder
 import com.example.data.model.GeoTaskItem
+import com.example.data.model.SavedLocationPreset
 
 @Database(
-    entities = [GeoReminder::class, GeoTaskItem::class],
-    version = 1,
+    entities = [GeoReminder::class, GeoTaskItem::class, SavedLocationPreset::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

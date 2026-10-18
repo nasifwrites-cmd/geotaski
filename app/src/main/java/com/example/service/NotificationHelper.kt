@@ -58,7 +58,7 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val titlePrefix = if (reminder.triggerType == "EXIT") "🚗 Left" else "📍 Arrived at"
+        val titlePrefix = if (reminder.triggerType == "EXIT") "Departed" else "Arrived at"
         val headerTitle = "$titlePrefix ${reminder.locationName}"
 
         val pendingTasks = tasks.filter { !it.isCompleted }
@@ -76,36 +76,52 @@ object NotificationHelper {
             .setSummaryText("${tasks.count { it.isCompleted }}/${tasks.size} completed")
 
         if (reminder.description.isNotBlank()) {
-            inboxStyle.addLine("📝 ${reminder.description}")
+            inboxStyle.addLine(reminder.description)
         }
         pendingTasks.take(4).forEach {
-            inboxStyle.addLine("☐ ${it.title}")
+            inboxStyle.addLine("- ${it.title}")
         }
         if (pendingTasks.size > 4) {
             inboxStyle.addLine("+ ${pendingTasks.size - 4} more tasks...")
         }
 
+        val stopIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+            action = NotificationActionReceiver.ACTION_STOP_ALARM
+            putExtra(EXTRA_REMINDER_ID, reminder.id)
+        }
+        val stopPendingIntent = PendingIntent.getBroadcast(
+            context,
+            (reminder.id * 10 + 3).toInt(),
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification = NotificationCompat.Builder(context, GeoTaskApplication.CHANNEL_REMINDERS)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(reminder.title)
+            .setContentTitle("Arrived at ${reminder.locationName}")
             .setContentText(taskSummary)
             .setSubText(reminder.locationName)
             .setStyle(inboxStyle)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
             .setContentIntent(openPendingIntent)
+            .setDeleteIntent(stopPendingIntent)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "STOP ALARM",
+                stopPendingIntent
+            )
             .addAction(
                 android.R.drawable.checkbox_on_background,
                 context.getString(R.string.action_complete),
                 donePendingIntent
             )
-            .addAction(
-                android.R.drawable.ic_lock_idle_alarm,
-                context.getString(R.string.action_snooze),
-                snoozePendingIntent
-            )
             .build()
+
+        // Start continuous buzzing alarm that will NOT stop until manually dismissed!
+        BuzzAlertHelper.startContinuousAlarm(context, reminder.locationName)
 
         try {
             notificationManager.notify(reminder.id.toInt(), notification)

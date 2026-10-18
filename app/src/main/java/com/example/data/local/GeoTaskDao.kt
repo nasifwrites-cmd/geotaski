@@ -73,4 +73,13 @@ interface GeoTaskDao {
 
     @Query("SELECT * FROM geo_tasks WHERE reminderId = :reminderId")
     suspend fun getTasksForReminder(reminderId: Long): List<GeoTaskItem>
+
+    @Query("SELECT * FROM saved_presets ORDER BY createdAt DESC")
+    fun getAllPresets(): Flow<List<com.example.data.model.SavedLocationPreset>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPreset(preset: com.example.data.model.SavedLocationPreset): Long
+
+    @Query("DELETE FROM saved_presets WHERE id = :id")
+    suspend fun deletePresetById(id: Long)
 }

@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.GeoTaskApplication
 import com.example.data.model.GeoReminder
 import com.example.data.model.ReminderWithTasks
+import com.example.data.model.SavedLocationPreset
+import com.example.service.BuzzAlertHelper
 import com.example.service.LocationMonitoringService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,27 +19,41 @@ import kotlinx.coroutines.launch
 
 data class SimpleUiState(
     val reminders: List<ReminderWithTasks> = emptyList(),
+    val savedPresets: List<SavedLocationPreset> = emptyList(),
     val currentLocation: Location? = null,
     val isAddOpen: Boolean = false,
-    val isLocationActive: Boolean = false
+    val isSaveCurrentSpotOpen: Boolean = false,
+    val isLocationActive: Boolean = false,
+    val isAlarmActive: Boolean = false,
+    val alarmLocationTitle: String = ""
 )
 
 class GeoTaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = (application as GeoTaskApplication).repository
     private val _isAddOpen = MutableStateFlow(false)
+    private val _isSaveCurrentSpotOpen = MutableStateFlow(false)
 
     val uiState: StateFlow<SimpleUiState> = combine(
         repository.allRemindersWithTasks,
+        repository.allPresets,
         LocationMonitoringService.currentLocationFlow,
         LocationMonitoringService.isServiceRunning,
-        _isAddOpen
-    ) { reminders, location, isRunning, isAddOpen ->
+        _isAddOpen,
+        _isSaveCurrentSpotOpen,
+        BuzzAlertHelper.isAlarmActive,
+        BuzzAlertHelper.alarmLocationTitle
+    ) { args: Array<Any?> ->
+        @Suppress("UNCHECKED_CAST")
         SimpleUiState(
-            reminders = reminders,
-            currentLocation = location,
-            isAddOpen = isAddOpen,
-            isLocationActive = isRunning
+            reminders = args[0] as List<ReminderWithTasks>,
+            savedPresets = args[1] as List<SavedLocationPreset>,
+            currentLocation = args[2] as Location?,
+            isLocationActive = args[3] as Boolean,
+            isAddOpen = args[4] as Boolean,
+            isSaveCurrentSpotOpen = args[5] as Boolean,
+            isAlarmActive = args[6] as Boolean,
+            alarmLocationTitle = args[7] as String
         )
     }.stateIn(
         scope = viewModelScope,
@@ -46,7 +62,6 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
-        // Automatically start the background location watcher
         LocationMonitoringService.startService(application)
         seedInitialSimpleTasks()
     }
@@ -79,7 +94,7 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun addReminder(task: String, placeName: String, lat: Double, lng: Double, radiusMeters: Float = 150f) {
+    fun addReminder(task: String, placeName: String, lat: Double, lng: Double, radiusMeters: Float = 10f) {
         if (task.isBlank() || placeName.isBlank()) return
         viewModelScope.launch {
             repository.insertReminderWithTasks(
@@ -102,9 +117,11 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val isNowTriggered = !item.reminder.isTriggered
             repository.updateTriggerStatus(item.reminder.id, isNowTriggered)
-            // also toggle child tasks if any
             item.tasks.forEach {
                 repository.setTaskCompleted(it.id, isNowTriggered)
+            }
+            if (isNowTriggered) {
+                stopAlarm()
             }
         }
     }
@@ -116,12 +133,31 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun testTrigger(item: ReminderWithTasks) {
-        // Immediately simulate arriving at this spot so notification triggers
+        // Starts continuous looping buzzing alarm that won't stop until manually clicked
+        BuzzAlertHelper.startContinuousAlarm(getApplication(), item.reminder.locationName)
         LocationMonitoringService.simulateLocation(
             getApplication(),
             item.reminder.latitude,
             item.reminder.longitude
         )
+    }
+
+    fun stopAlarm() {
+        BuzzAlertHelper.stopAlarm(getApplication())
+    }
+
+    fun saveCustomPreset(name: String, lat: Double, lng: Double, radius: Float = 10f) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            repository.savePreset(name.trim(), lat, lng, radius)
+            _isSaveCurrentSpotOpen.value = false
+        }
+    }
+
+    fun deleteCustomPreset(id: Long) {
+        viewModelScope.launch {
+            repository.deletePreset(id)
+        }
     }
 
     fun openAddDialog() {
@@ -130,5 +166,13 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
 
     fun closeAddDialog() {
         _isAddOpen.value = false
+    }
+
+    fun openSaveCurrentSpotDialog() {
+        _isSaveCurrentSpotOpen.value = true
+    }
+
+    fun closeSaveCurrentSpotDialog() {
+        _isSaveCurrentSpotOpen.value = false
     }
 }
