@@ -1,0 +1,6 @@
+{
+  "name": "GeoTask",
+  "description": "Location-based reminders and proximity tasks with real-time geographic notification alerts, geofence radius tracking, and custom task checklists.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
