@@ -209,7 +209,11 @@ class LocationMonitoringService : Service() {
             // Native Network Listener (Cell Towers + Wi-Fi) - instant lock indoors and on streets
             networkLocationListener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
-                    processLocationUpdate(location)
+                    _currentLocationFlow.value = location
+                    // Only process trigger logic from network provider if accuracy is high
+                    if (!location.hasAccuracy() || location.accuracy <= 10f) {
+                        processLocationUpdate(location)
+                    }
                 }
                 @Deprecated("Deprecated in Java")
                 override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -263,6 +267,12 @@ class LocationMonitoringService : Service() {
                     continue
                 }
 
+                // If location fix has poor accuracy (e.g. 15-50m drift), do not trigger tight radius (e.g. 1-10m) false alarm!
+                if (location.hasAccuracy() && reminder.radiusMeters <= 10f && location.accuracy > 8f) {
+                    Log.d(TAG, "Skipping trigger check: fix accuracy (${location.accuracy}m) is too coarse for tight radius ${reminder.radiusMeters}m")
+                    continue
+                }
+
                 val distanceResults = FloatArray(1)
                 Location.distanceBetween(
                     location.latitude,
@@ -273,12 +283,14 @@ class LocationMonitoringService : Service() {
                 )
                 val distanceMeters = distanceResults[0]
 
-                val effectiveRadius = reminder.radiusMeters + 1.0f
-                val isCurrentlyInside = distanceMeters <= effectiveRadius
+                // STRICT RADIUS: Distance must strictly be within user-specified radius!
+                // If radius is 1m, user must be <= 1.0 meter away. No extra buffer!
+                val isCurrentlyInside = distanceMeters <= reminder.radiusMeters
                 val wasInside = previousInsideState[reminder.id] ?: false
 
                 if (reminder.triggerType == "ENTER") {
                     if (isCurrentlyInside) {
+                        Log.d(TAG, "STRICT ARRIVAL CONFIRMED: distance ${distanceMeters}m <= radius ${reminder.radiusMeters}m. Triggering alarm!")
                         // Lock state immediately so no subsequent update can re-trigger!
                         triggeredOrFinishedIds.add(reminder.id)
                         previousInsideState[reminder.id] = true

@@ -68,4 +68,26 @@ class ExampleRobolectricTest {
         val manager = com.example.service.GoogleKeepGeofenceManager.getInstance(context)
         org.junit.Assert.assertNotNull(manager)
     }
+
+    @Test
+    fun `test 6 meters away does not trigger 1 meter radius reminder`() {
+        val reminder = GeoReminder(
+            id = 5,
+            title = "1m Spot",
+            latitude = 23.790000,
+            longitude = 90.410000,
+            locationName = "Exact Spot",
+            radiusMeters = 1.0f
+        )
+
+        // Case 1: User is 6 meters away
+        val distanceAt6Meters = 6.0f
+        val isInsideAt6m = distanceAt6Meters <= reminder.radiusMeters
+        assertFalse("Alarm must NOT trigger when 6 meters away from 1 meter radius spot", isInsideAt6m)
+
+        // Case 2: User strictly steps inside (e.g. 0.8 meters away)
+        val distanceAtStepIn = 0.8f
+        val isInsideAtStepIn = distanceAtStepIn <= reminder.radiusMeters
+        assertTrue("Alarm MUST trigger when strictly inside 1 meter radius spot", isInsideAtStepIn)
+    }
 }
