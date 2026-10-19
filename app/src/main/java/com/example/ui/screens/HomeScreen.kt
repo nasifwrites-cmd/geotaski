@@ -51,7 +51,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,6 +76,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var selectedPresetForReminder by remember { mutableStateOf<com.example.data.model.SavedLocationPreset?>(null) }
 
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -277,6 +280,10 @@ fun HomeScreen(
                     ) {
                         items(uiState.savedPresets, key = { it.id }) { preset ->
                             Surface(
+                                onClick = {
+                                    selectedPresetForReminder = preset
+                                    viewModel.openAddDialog()
+                                },
                                 shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
@@ -386,12 +393,17 @@ fun HomeScreen(
         AddSimpleReminderDialog(
             currentLocation = uiState.currentLocation,
             savedPresets = uiState.savedPresets,
+            initialPreset = selectedPresetForReminder,
             isAcquiringLocation = uiState.isAcquiringLocation,
             onRequestPreciseLocation = { callback ->
                 viewModel.requestPreciseLocation(callback)
             },
-            onDismiss = { viewModel.closeAddDialog() },
+            onDismiss = {
+                selectedPresetForReminder = null
+                viewModel.closeAddDialog()
+            },
             onSave = { task, placeName, lat, lng, radius, alsoSavePreset ->
+                selectedPresetForReminder = null
                 viewModel.addReminder(task, placeName, lat, lng, radius)
                 if (alsoSavePreset) {
                     viewModel.saveCustomPreset(placeName, lat, lng, radius)
