@@ -104,7 +104,7 @@ object NotificationHelper {
             .setStyle(inboxStyle)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setDefaults(NotificationCompat.DEFAULT_LIGHTS)
             .setAutoCancel(true)
             .setContentIntent(openPendingIntent)
             .setDeleteIntent(stopPendingIntent)

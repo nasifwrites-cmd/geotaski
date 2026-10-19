@@ -36,25 +36,24 @@ import kotlinx.coroutines.launch
 
 class LocationMonitoringService : Service() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var fusedLocationClient: FusedLocationProviderClient? = null
     private var locationCallback: LocationCallback? = null
     private var locationManager: LocationManager? = null
-    private var nativeLocationListener: LocationListener? = null
+    private var gpsLocationListener: LocationListener? = null
+    private var networkLocationListener: LocationListener? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
-    // Track state for each reminder
+    // Track state for each reminder to detect the exact moment of entry
     private val previousInsideState = mutableMapOf<Long, Boolean>()
 
     override fun onCreate() {
         super.onCreate()
         _isServiceRunning.value = true
 
-        // Acquire WakeLock so CPU keeps processing GPS even when screen is locked/off
         acquireWakeLock()
-
         startForegroundWithNotification(0, "Active")
-        setupHighFrequencyLocationTracking()
+        setupUltraFastLocationTracking()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -71,17 +70,16 @@ class LocationMonitoringService : Service() {
                     latitude = lat
                     longitude = lng
                     time = System.currentTimeMillis()
+                    accuracy = 1.0f
                 }
                 processLocationUpdate(mockLoc)
             }
         }
-        // START_STICKY ensures OS automatically recreates service if killed
         return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // When user swipes away / closes app from Recent Apps, restart service immediately
         try {
             val restartServiceIntent = Intent(applicationContext, LocationMonitoringService::class.java).apply {
                 action = ACTION_START_SERVICE
@@ -108,10 +106,10 @@ class LocationMonitoringService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
             wakeLock = powerManager?.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "GeoTask::PersistentLocationWakeLock"
+                "GeoTask::HighSpeedLocationWakeLock"
             )?.apply {
                 setReferenceCounted(false)
-                acquire(24 * 60 * 60 * 1000L) // Safe 24-hour lease
+                acquire(24 * 60 * 60 * 1000L)
             }
         } catch (e: Exception) {
             Log.w(TAG, "WakeLock error: ${e.message}")
@@ -144,21 +142,23 @@ class LocationMonitoringService : Service() {
     }
 
     /**
-     * Configures ultra-fast, high-precision GPS tracking (1 second interval, 0m distance filter)
-     * so that arriving at 5m, 10m, 15m, 20m triggers the alarm immediately.
+     * Ultra-fast multi-source location tracking:
+     * Combines Google Fused Provider (500ms) + Native GPS + Native Network/Cell in parallel
+     * so that entering a 5m, 10m, 15m, 20m radius triggers the alarm in real time!
      */
     @SuppressLint("MissingPermission")
-    private fun setupHighFrequencyLocationTracking() {
+    private fun setupUltraFastLocationTracking() {
+        // 1. Google Play Services Fused Location Client
         try {
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
             val locationRequest = LocationRequest.Builder(
                 Priority.PRIORITY_HIGH_ACCURACY,
-                1000L // update every 1 second!
+                500L // Fast 500ms update interval!
             ).apply {
-                setMinUpdateIntervalMillis(500L) // Fastest update 500ms
-                setMinUpdateDistanceMeters(0f) // Sub-meter sensitivity
-                setMaxUpdateDelayMillis(1000L) // Deliver immediately, no batching
+                setMinUpdateIntervalMillis(0L) // Fastest possible rate (zero delay)
+                setMinUpdateDistanceMeters(0f) // 0-meter distance filter (instant detection)
+                setMaxUpdateDelayMillis(0L) // Zero batching latency
                 setWaitForAccurateLocation(false)
             }.build()
 
@@ -175,27 +175,26 @@ class LocationMonitoringService : Service() {
                 Looper.getMainLooper()
             )
 
-            // Request last known position immediately
             fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
                 if (location != null) {
                     processLocationUpdate(location)
                 }
             }
-
-            // Also keep native GPS provider active as parallel fallback
-            setupNativeLocationListener()
-
         } catch (e: Exception) {
             Log.e(TAG, "Fused location setup error: ${e.message}")
-            setupNativeLocationListener()
         }
+
+        // 2. Parallel Native System Location Providers (BOTH GPS & Network running together!)
+        setupParallelNativeLocationListeners()
     }
 
     @SuppressLint("MissingPermission")
-    private fun setupNativeLocationListener() {
+    private fun setupParallelNativeLocationListeners() {
         try {
-            locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            nativeLocationListener = object : LocationListener {
+            locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
+
+            // Native GPS Listener (Satellite)
+            gpsLocationListener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     processLocationUpdate(location)
                 }
@@ -205,26 +204,38 @@ class LocationMonitoringService : Service() {
                 override fun onProviderDisabled(provider: String) {}
             }
 
-            val isGpsEnabled = locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
-            if (isGpsEnabled) {
+            // Native Network Listener (Cell Towers + Wi-Fi) - instant lock indoors and on streets
+            networkLocationListener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    processLocationUpdate(location)
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
+
+            if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1000L,
+                    500L,
                     0f,
-                    nativeLocationListener as LocationListener,
+                    gpsLocationListener as LocationListener,
                     Looper.getMainLooper()
                 )
-            } else {
+            }
+
+            if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    1000L,
+                    500L,
                     0f,
-                    nativeLocationListener as LocationListener,
+                    networkLocationListener as LocationListener,
                     Looper.getMainLooper()
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Native location listener error: ${e.message}")
+            Log.e(TAG, "Native location listener setup error: ${e.message}")
         }
     }
 
@@ -254,11 +265,15 @@ class LocationMonitoringService : Service() {
                     distanceResults
                 )
                 val distanceMeters = distanceResults[0]
-                val isCurrentlyInside = distanceMeters <= reminder.radiusMeters
+
+                // For small radii (5m, 10m, 15m, 20m), include a 3-meter threshold buffer
+                // for standard consumer GPS satellite jitter so the alarm rings the split second
+                // the user reaches the area!
+                val effectiveRadius = reminder.radiusMeters + 3.0f
+                val isCurrentlyInside = distanceMeters <= effectiveRadius
                 val wasInside = previousInsideState[reminder.id] ?: false
 
                 if (reminder.triggerType == "ENTER") {
-                    // Trigger alarm immediately as soon as user enters the radius!
                     val isEnteringNow = !wasInside && isCurrentlyInside
                     val isInsideNotTriggered = isCurrentlyInside && !reminder.isTriggered
 
@@ -289,7 +304,8 @@ class LocationMonitoringService : Service() {
         _isServiceRunning.value = false
         releaseWakeLock()
         locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
-        nativeLocationListener?.let { locationManager?.removeUpdates(it) }
+        gpsLocationListener?.let { locationManager?.removeUpdates(it) }
+        networkLocationListener?.let { locationManager?.removeUpdates(it) }
         serviceScope.cancel()
     }
 
