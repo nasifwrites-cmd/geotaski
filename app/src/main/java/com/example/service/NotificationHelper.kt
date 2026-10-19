@@ -22,10 +22,11 @@ object NotificationHelper {
     ) {
         val notificationManager = NotificationManagerCompat.from(context)
 
-        // Main Tap Intent: Opens app
+        // Main Tap Intent: Opens app and finishes reminder / stops alarm
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_REMINDER_ID, reminder.id)
+            putExtra(EXTRA_AUTO_STOP, true)
         }
         val openPendingIntent = PendingIntent.getActivity(
             context,
@@ -105,12 +106,13 @@ object NotificationHelper {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setDefaults(NotificationCompat.DEFAULT_LIGHTS)
+            .setVibrate(longArrayOf(0))
             .setAutoCancel(true)
             .setContentIntent(openPendingIntent)
             .setDeleteIntent(stopPendingIntent)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "STOP ALARM",
+                "STOP & FINISH",
                 stopPendingIntent
             )
             .addAction(
@@ -121,7 +123,7 @@ object NotificationHelper {
             .build()
 
         // Start continuous buzzing alarm that will NOT stop until manually dismissed!
-        BuzzAlertHelper.startContinuousAlarm(context, reminder.locationName)
+        BuzzAlertHelper.startContinuousAlarm(context, reminder.locationName, reminder.id)
 
         try {
             notificationManager.notify(reminder.id.toInt(), notification)
@@ -156,4 +158,5 @@ object NotificationHelper {
     }
 
     const val EXTRA_REMINDER_ID = "extra_reminder_id"
+    const val EXTRA_AUTO_STOP = "extra_auto_stop"
 }

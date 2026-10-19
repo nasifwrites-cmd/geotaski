@@ -46,9 +46,11 @@ class LocationMonitoringService : Service() {
 
     // Track state for each reminder to detect the exact moment of entry
     private val previousInsideState = mutableMapOf<Long, Boolean>()
+    private val triggeredOrFinishedIds = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         _isServiceRunning.value = true
 
         acquireWakeLock()
@@ -252,6 +254,11 @@ class LocationMonitoringService : Service() {
             val now = System.currentTimeMillis()
 
             for (reminder in reminders) {
+                // If reminder is already triggered, disabled, or marked handled in memory, skip completely!
+                if (triggeredOrFinishedIds.contains(reminder.id) || !reminder.isEnabled || reminder.isTriggered) {
+                    continue
+                }
+
                 if (reminder.snoozedUntil != null && reminder.snoozedUntil > now) {
                     continue
                 }
@@ -266,25 +273,24 @@ class LocationMonitoringService : Service() {
                 )
                 val distanceMeters = distanceResults[0]
 
-                // For small radii (5m, 10m, 15m, 20m), include a 3-meter threshold buffer
-                // for standard consumer GPS satellite jitter so the alarm rings the split second
-                // the user reaches the area!
-                val effectiveRadius = reminder.radiusMeters + 3.0f
+                val effectiveRadius = reminder.radiusMeters + 1.0f
                 val isCurrentlyInside = distanceMeters <= effectiveRadius
                 val wasInside = previousInsideState[reminder.id] ?: false
 
                 if (reminder.triggerType == "ENTER") {
-                    val isEnteringNow = !wasInside && isCurrentlyInside
-                    val isInsideNotTriggered = isCurrentlyInside && !reminder.isTriggered
-
-                    if (isEnteringNow || isInsideNotTriggered) {
-                        triggerNotificationForReminder(reminder)
+                    if (isCurrentlyInside) {
+                        // Lock state immediately so no subsequent update can re-trigger!
+                        triggeredOrFinishedIds.add(reminder.id)
+                        previousInsideState[reminder.id] = true
                         repository.updateTriggerStatus(reminder.id, isTriggered = true, timestamp = now)
+                        triggerNotificationForReminder(reminder)
                     }
                 } else if (reminder.triggerType == "EXIT") {
                     if (wasInside && !isCurrentlyInside) {
-                        triggerNotificationForReminder(reminder)
+                        triggeredOrFinishedIds.add(reminder.id)
+                        previousInsideState[reminder.id] = false
                         repository.updateTriggerStatus(reminder.id, isTriggered = true, timestamp = now)
+                        triggerNotificationForReminder(reminder)
                     }
                 }
 
@@ -301,6 +307,7 @@ class LocationMonitoringService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         _isServiceRunning.value = false
         releaseWakeLock()
         locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
@@ -315,6 +322,8 @@ class LocationMonitoringService : Service() {
         private const val TAG = "LocationMonitoring"
         private const val NOTIFICATION_ID = 1001
 
+        private var instance: LocationMonitoringService? = null
+
         const val ACTION_START_SERVICE = "com.example.geotask.START_SERVICE"
         const val ACTION_STOP_SERVICE = "com.example.geotask.STOP_SERVICE"
         const val ACTION_SIMULATE_LOCATION = "com.example.geotask.SIMULATE_LOCATION"
@@ -326,6 +335,20 @@ class LocationMonitoringService : Service() {
 
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning = _isServiceRunning.asStateFlow()
+
+        fun markReminderFinished(reminderId: Long) {
+            instance?.apply {
+                triggeredOrFinishedIds.add(reminderId)
+                previousInsideState[reminderId] = true
+            }
+        }
+
+        fun resetReminderState(reminderId: Long) {
+            instance?.apply {
+                triggeredOrFinishedIds.remove(reminderId)
+                previousInsideState.remove(reminderId)
+            }
+        }
 
         fun startService(context: Context) {
             val intent = Intent(context, LocationMonitoringService::class.java).apply {

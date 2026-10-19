@@ -35,7 +35,7 @@ class GeoTaskApplication : Application() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = getString(R.string.channel_reminders_desc)
-                enableVibration(true)
+                enableVibration(false)
                 setShowBadge(true)
             }
 

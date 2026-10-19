@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,11 +21,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Check if opened from notification tap
-        val reminderId = intent?.getLongExtra(NotificationHelper.EXTRA_REMINDER_ID, -1L) ?: -1L
-        if (reminderId != -1L) {
-            // Can highlight or focus reminder
-        }
+        handleIntent(intent)
 
         setContent {
             GeoTaskTheme {
@@ -33,6 +30,20 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val reminderId = intent?.getLongExtra(NotificationHelper.EXTRA_REMINDER_ID, -1L) ?: -1L
+        val autoStop = intent?.getBooleanExtra(NotificationHelper.EXTRA_AUTO_STOP, false) ?: false
+        if (reminderId != -1L && autoStop) {
+            viewModel.stopAlarmAndFinish(reminderId)
         }
     }
 }

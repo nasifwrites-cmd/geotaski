@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.location.Location
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -18,14 +19,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EditLocation
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -36,7 +38,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.SavedLocationPreset
+import java.util.Locale
 
 private data class SimplePlace(
     val name: String,
@@ -64,7 +70,6 @@ private val DEFAULT_PLACES = listOf(
     SimplePlace("Pharmacy", 23.7990, 90.4100)
 )
 
-// Default radius options requested: 5m, 10m, 15m, 20m
 private val RADIUS_PRESETS = listOf(5, 10, 15, 20)
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -72,28 +77,44 @@ private val RADIUS_PRESETS = listOf(5, 10, 15, 20)
 fun AddSimpleReminderDialog(
     currentLocation: Location?,
     savedPresets: List<SavedLocationPreset>,
+    isAcquiringLocation: Boolean = false,
+    onRequestPreciseLocation: ((Location) -> Unit) -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (task: String, placeName: String, lat: Double, lng: Double, radiusMeters: Float, alsoSavePreset: Boolean) -> Unit
 ) {
     var taskText by remember { mutableStateOf("") }
+    var placeName by remember { mutableStateOf("") }
 
-    // Place selection
-    var isManualLocation by remember { mutableStateOf(false) }
-    var placeName by remember { mutableStateOf(DEFAULT_PLACES[0].name) }
     var latText by remember {
         mutableStateOf(
-            currentLocation?.latitude?.toString() ?: DEFAULT_PLACES[0].lat.toString()
+            if (currentLocation != null) String.format(Locale.US, "%.6f", currentLocation.latitude)
+            else ""
         )
     }
     var lngText by remember {
         mutableStateOf(
-            currentLocation?.longitude?.toString() ?: DEFAULT_PLACES[0].lng.toString()
+            if (currentLocation != null) String.format(Locale.US, "%.6f", currentLocation.longitude)
+            else ""
         )
     }
 
-    // Default radius set to 10m
+    var acquiredAccuracy by remember { mutableFloatStateOf(currentLocation?.accuracy ?: -1f) }
+    var hasExactGpsLock by remember { mutableStateOf(currentLocation != null) }
     var radiusMetersText by remember { mutableStateOf("10") }
     var alsoSavePreset by remember { mutableStateOf(false) }
+
+    // If initial location was null but later received or dialog opens, initialize placeName
+    LaunchedEffect(currentLocation) {
+        if (currentLocation != null && latText.isBlank() && lngText.isBlank()) {
+            latText = String.format(Locale.US, "%.6f", currentLocation.latitude)
+            lngText = String.format(Locale.US, "%.6f", currentLocation.longitude)
+            acquiredAccuracy = currentLocation.accuracy
+            hasExactGpsLock = true
+            if (placeName.isBlank()) {
+                placeName = "Current Spot"
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -105,11 +126,11 @@ fun AddSimpleReminderDialog(
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth(0.94f)
-                .heightIn(max = 660.dp)
+                .heightIn(max = 680.dp)
         ) {
             LazyColumn(
                 modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Header
                 item {
@@ -125,7 +146,7 @@ fun AddSimpleReminderDialog(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Continuous alert upon reaching proximity",
+                                text = "Loud buzzing alert triggers upon entering radius",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -144,7 +165,7 @@ fun AddSimpleReminderDialog(
                     OutlinedTextField(
                         value = taskText,
                         onValueChange = { taskText = it },
-                        label = { Text("Task") },
+                        label = { Text("Task Description") },
                         placeholder = { Text("e.g. Collect documents, purchase groceries") },
                         singleLine = true,
                         modifier = Modifier
@@ -154,45 +175,139 @@ fun AddSimpleReminderDialog(
                     )
                 }
 
-                // 2. Location selection (Presets or Manual)
+                // 2. Exact GPS Capture Button (Primary Action)
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Destination Location",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Text(
+                            text = "Destination Location",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                            OutlinedButton(
-                                onClick = { isManualLocation = !isManualLocation },
-                                modifier = Modifier.height(32.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.EditLocation,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
+                        // Prominent "Get Exact Current Location" button
+                        Button(
+                            onClick = {
+                                onRequestPreciseLocation { loc ->
+                                    latText = String.format(Locale.US, "%.6f", loc.latitude)
+                                    lngText = String.format(Locale.US, "%.6f", loc.longitude)
+                                    acquiredAccuracy = loc.accuracy
+                                    hasExactGpsLock = true
+                                    if (placeName.isBlank()) {
+                                        placeName = "Current Spot"
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("btn_get_exact_gps"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            if (isAcquiringLocation) {
+                                CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Fetching High-Precision GPS Lock...", fontSize = 12.sp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.MyLocation,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (isManualLocation) "Presets" else "Custom Coordinates",
-                                    fontSize = 11.sp
+                                    text = if (hasExactGpsLock) "Update Exact Current Location" else "Get Exact Current Location",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
 
-                        if (!isManualLocation) {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                        // Status Badge showing coordinates & GPS accuracy
+                        if (latText.isNotBlank() && lngText.isNotBlank()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                // Default presets
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "GPS Coordinates: $latText, $lngText",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        Text(
+                                            text = if (acquiredAccuracy > 0)
+                                                "Accuracy: ±${acquiredAccuracy.toInt()}m (Satellite Lock)"
+                                            else
+                                                "High-precision coordinates set",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Presets Chips
+                        if (savedPresets.isNotEmpty() || DEFAULT_PLACES.isNotEmpty()) {
+                            Text(
+                                text = "Or pick from presets:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                savedPresets.forEach { preset ->
+                                    val isSelected = placeName == preset.name
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            placeName = preset.name
+                                            latText = String.format(Locale.US, "%.6f", preset.latitude)
+                                            lngText = String.format(Locale.US, "%.6f", preset.longitude)
+                                            radiusMetersText = preset.defaultRadiusMeters.toInt().toString()
+                                            hasExactGpsLock = true
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Bookmark,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        },
+                                        label = { Text(preset.name, fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    )
+                                }
+
                                 DEFAULT_PLACES.forEach { place ->
                                     val isSelected = placeName == place.name
                                     FilterChip(
@@ -201,151 +316,82 @@ fun AddSimpleReminderDialog(
                                             placeName = place.name
                                             latText = place.lat.toString()
                                             lngText = place.lng.toString()
+                                            hasExactGpsLock = true
                                         },
-                                        label = { Text(place.name) },
+                                        label = { Text(place.name, fontSize = 11.sp) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     )
                                 }
-
-                                // User-saved presets
-                                savedPresets.forEach { preset ->
-                                    val isSelected = placeName == preset.name
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = {
-                                            placeName = preset.name
-                                            latText = preset.latitude.toString()
-                                            lngText = preset.longitude.toString()
-                                            radiusMetersText = preset.defaultRadiusMeters.toInt().toString()
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.Bookmark,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        },
-                                        label = { Text(preset.name) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    )
-                                }
-
-                                // Current Location option
-                                currentLocation?.let { loc ->
-                                    FilterChip(
-                                        selected = placeName == "Current Position",
-                                        onClick = {
-                                            placeName = "Current Position"
-                                            latText = String.format("%.6f", loc.latitude)
-                                            lngText = String.format("%.6f", loc.longitude)
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Default.MyLocation,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        },
-                                        label = { Text("Current Position") }
-                                    )
-                                }
                             }
-                        } else {
-                            // Manual Location Inputs
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = placeName,
-                                    onValueChange = { placeName = it },
-                                    label = { Text("Location Name") },
-                                    placeholder = { Text("e.g. Headquarters, Central Archive") },
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("manual_place_name"),
-                                    shape = RoundedCornerShape(12.dp)
+                        }
+
+                        // Place name
+                        OutlinedTextField(
+                            value = placeName,
+                            onValueChange = { placeName = it },
+                            label = { Text("Location Name") },
+                            placeholder = { Text("e.g. Central Market, Branch Office, Gym") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("manual_place_name"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        // Editable Latitude and Longitude
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = latText,
+                                onValueChange = { latText = it },
+                                label = { Text("Latitude") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("manual_lat_input"),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            OutlinedTextField(
+                                value = lngText,
+                                onValueChange = { lngText = it },
+                                label = { Text("Longitude") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("manual_lng_input"),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                        }
+
+                        // Checkbox to also save preset
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Checkbox(
+                                checked = alsoSavePreset,
+                                onCheckedChange = { alsoSavePreset = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = MaterialTheme.colorScheme.primary
                                 )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedTextField(
-                                        value = latText,
-                                        onValueChange = { latText = it },
-                                        label = { Text("Latitude") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("manual_lat_input"),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    OutlinedTextField(
-                                        value = lngText,
-                                        onValueChange = { lngText = it },
-                                        label = { Text("Longitude") },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("manual_lng_input"),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                }
-
-                                currentLocation?.let { loc ->
-                                    Button(
-                                        onClick = {
-                                            latText = String.format("%.6f", loc.latitude)
-                                            lngText = String.format("%.6f", loc.longitude)
-                                            if (placeName.isBlank()) placeName = "Current Position"
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                        ),
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MyLocation,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Use Current GPS Coordinates", fontSize = 12.sp)
-                                    }
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Checkbox(
-                                        checked = alsoSavePreset,
-                                        onCheckedChange = { alsoSavePreset = it },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = MaterialTheme.colorScheme.primary
-                                        )
-                                    )
-                                    Text(
-                                        text = "Save this location as a reusable preset",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
+                            )
+                            Text(
+                                text = "Save this location as a reusable preset for next usage",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     }
                 }
 
-                // 3. Radius Option (5m, 10m, 15m, 20m + manual)
+                // 3. Proximity Radius (5, 10, 15, 20 + custom)
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -367,7 +413,6 @@ fun AddSimpleReminderDialog(
                             )
                         }
 
-                        // Default requested options: 5m, 10m, 15m, 20m
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -377,7 +422,7 @@ fun AddSimpleReminderDialog(
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { radiusMetersText = r.toString() },
-                                    label = { Text("${r} m") },
+                                    label = { Text("${r}m") },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -403,6 +448,11 @@ fun AddSimpleReminderDialog(
 
                 // 4. Actions
                 item {
+                    val parsedLat = latText.toDoubleOrNull()
+                    val parsedLng = lngText.toDoubleOrNull()
+                    val parsedRadius = radiusMetersText.toFloatOrNull() ?: 10f
+                    val isValid = taskText.isNotBlank() && placeName.isNotBlank() && parsedLat != null && parsedLng != null
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -416,11 +466,6 @@ fun AddSimpleReminderDialog(
                         ) {
                             Text("Cancel")
                         }
-
-                        val parsedLat = latText.toDoubleOrNull()
-                        val parsedLng = lngText.toDoubleOrNull()
-                        val parsedRadius = radiusMetersText.toFloatOrNull() ?: 10f
-                        val isValid = taskText.isNotBlank() && placeName.isNotBlank() && parsedLat != null && parsedLng != null
 
                         Button(
                             onClick = {
@@ -454,19 +499,41 @@ fun AddSimpleReminderDialog(
 }
 
 /**
- * Dialog to save current GPS location as a preset for future usage
+ * Dedicated dialog to capture exact GPS coordinates and save as preset for future usage
  */
 @Composable
 fun SaveCurrentLocationPresetDialog(
     currentLocation: Location?,
+    isAcquiringLocation: Boolean = false,
+    onRequestPreciseLocation: ((Location) -> Unit) -> Unit = {},
     onDismiss: () -> Unit,
     onSave: (name: String, lat: Double, lng: Double, radius: Float) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var radiusText by remember { mutableStateOf("10") }
 
-    val lat = currentLocation?.latitude ?: 23.7937
-    val lng = currentLocation?.longitude ?: 90.4066
+    var lat by remember {
+        mutableDoubleStateOf(currentLocation?.latitude ?: 0.0)
+    }
+    var lng by remember {
+        mutableDoubleStateOf(currentLocation?.longitude ?: 0.0)
+    }
+    var accuracy by remember {
+        mutableFloatStateOf(currentLocation?.accuracy ?: -1f)
+    }
+    var hasCaptured by remember { mutableStateOf(currentLocation != null && currentLocation.latitude != 0.0) }
+
+    LaunchedEffect(currentLocation) {
+        if (currentLocation != null && !hasCaptured) {
+            lat = currentLocation.latitude
+            lng = currentLocation.longitude
+            accuracy = currentLocation.accuracy
+            hasCaptured = true
+            if (name.isBlank()) {
+                name = "Current Location"
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -491,7 +558,7 @@ fun SaveCurrentLocationPresetDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Save coordinates for future reminders",
+                            text = "Capture exact GPS position for future alerts",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -501,9 +568,56 @@ fun SaveCurrentLocationPresetDialog(
                     }
                 }
 
+                // Explicit Button to Fetch Precise GPS Location
+                Button(
+                    onClick = {
+                        onRequestPreciseLocation { loc ->
+                            lat = loc.latitude
+                            lng = loc.longitude
+                            accuracy = loc.accuracy
+                            hasCaptured = true
+                            if (name.isBlank()) {
+                                name = "Current Location"
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("save_spot_capture_gps_btn"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (isAcquiringLocation) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Acquiring Precise Satellite GPS...", fontSize = 12.sp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (hasCaptured) "Re-Capture Exact GPS" else "Capture Exact GPS Location",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Confirmation Surface showing exact coordinates & accuracy
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (hasCaptured) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, if (hasCaptured) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -512,22 +626,30 @@ fun SaveCurrentLocationPresetDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.LocationOn,
+                            imageVector = if (hasCaptured) Icons.Default.CheckCircle else Icons.Default.LocationOn,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            tint = if (hasCaptured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                         Column {
                             Text(
-                                text = "Coordinates: ${String.format("%.5f, %.5f", lat, lng)}",
-                                fontWeight = FontWeight.SemiBold,
+                                text = if (hasCaptured)
+                                    "Exact GPS: ${String.format(Locale.US, "%.6f, %.6f", lat, lng)}"
+                                else
+                                    "No GPS coordinates locked yet",
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (hasCaptured) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (currentLocation != null) "Accurate GPS fix" else "Default position",
+                                text = if (accuracy > 0)
+                                    "Accuracy: ±${accuracy.toInt()} meters (High Precision)"
+                                else if (hasCaptured)
+                                    "Precise coordinates acquired"
+                                else
+                                    "Tap 'Capture Exact GPS Location' above",
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (hasCaptured) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -568,13 +690,14 @@ fun SaveCurrentLocationPresetDialog(
                         Text("Cancel")
                     }
 
+                    val canSave = name.isNotBlank() && hasCaptured && lat != 0.0
                     Button(
                         onClick = {
-                            if (name.isNotBlank()) {
+                            if (canSave) {
                                 onSave(name, lat, lng, radiusText.toFloatOrNull() ?: 10f)
                             }
                         },
-                        enabled = name.isNotBlank(),
+                        enabled = canSave,
                         modifier = Modifier
                             .weight(1f)
                             .testTag("save_spot_confirm_btn"),

@@ -6,6 +6,7 @@ import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import com.example.GeoTaskApplication
 import com.example.service.BuzzAlertHelper
+import com.example.service.LocationMonitoringService
 import com.example.service.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,21 +23,13 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
         // Stop continuous buzzing alarm immediately on any user action
         BuzzAlertHelper.stopAlarm(context)
+        LocationMonitoringService.markReminderFinished(reminderId)
 
         when (intent.action) {
-            ACTION_STOP_ALARM -> {
-                // Dismiss notification and silence alarm
-                notificationManager.cancel(reminderId.toInt())
-            }
-            ACTION_MARK_DONE -> {
-                // Dismiss notification, silence alarm, mark tasks done
+            ACTION_STOP_ALARM, ACTION_MARK_DONE -> {
                 notificationManager.cancel(reminderId.toInt())
                 CoroutineScope(Dispatchers.IO).launch {
-                    val tasks = repository.getTasksForReminder(reminderId)
-                    tasks.forEach { task ->
-                        repository.setTaskCompleted(task.id, true)
-                    }
-                    repository.updateTriggerStatus(reminderId, isTriggered = true)
+                    repository.finishReminder(reminderId)
                 }
             }
             ACTION_SNOOZE -> {

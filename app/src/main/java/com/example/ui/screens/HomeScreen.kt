@@ -244,7 +244,7 @@ fun HomeScreen(
                         }
 
                         Button(
-                            onClick = { viewModel.stopAlarm() },
+                            onClick = { viewModel.stopAlarmAndFinish(uiState.ringingReminderId) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.onError,
                                 contentColor = MaterialTheme.colorScheme.error
@@ -252,7 +252,7 @@ fun HomeScreen(
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.testTag("stop_alarm_banner_btn")
                         ) {
-                            Text("STOP", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("STOP & FINISH", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }
@@ -351,11 +351,14 @@ fun HomeScreen(
                         items = uiState.reminders,
                         key = { it.reminder.id }
                     ) { item ->
+                        val isCardRinging = uiState.isAlarmActive && uiState.ringingReminderId == item.reminder.id
                         SimpleReminderCard(
                             item = item,
                             currentLocation = uiState.currentLocation,
+                            isRinging = isCardRinging,
                             onToggle = { viewModel.toggleReminder(item) },
                             onTest = { viewModel.testTrigger(item) },
+                            onStopAlarm = { viewModel.stopAlarmAndFinish(item.reminder.id) },
                             onDelete = { viewModel.deleteReminder(item) }
                         )
                     }
@@ -383,6 +386,10 @@ fun HomeScreen(
         AddSimpleReminderDialog(
             currentLocation = uiState.currentLocation,
             savedPresets = uiState.savedPresets,
+            isAcquiringLocation = uiState.isAcquiringLocation,
+            onRequestPreciseLocation = { callback ->
+                viewModel.requestPreciseLocation(callback)
+            },
             onDismiss = { viewModel.closeAddDialog() },
             onSave = { task, placeName, lat, lng, radius, alsoSavePreset ->
                 viewModel.addReminder(task, placeName, lat, lng, radius)
@@ -396,6 +403,10 @@ fun HomeScreen(
     if (uiState.isSaveCurrentSpotOpen) {
         SaveCurrentLocationPresetDialog(
             currentLocation = uiState.currentLocation,
+            isAcquiringLocation = uiState.isAcquiringLocation,
+            onRequestPreciseLocation = { callback ->
+                viewModel.requestPreciseLocation(callback)
+            },
             onDismiss = { viewModel.closeSaveCurrentSpotDialog() },
             onSave = { name, lat, lng, radius ->
                 viewModel.saveCustomPreset(name, lat, lng, radius)
@@ -408,8 +419,10 @@ fun HomeScreen(
 private fun SimpleReminderCard(
     item: ReminderWithTasks,
     currentLocation: Location?,
+    isRinging: Boolean = false,
     onToggle: () -> Unit,
     onTest: () -> Unit,
+    onStopAlarm: () -> Unit,
     onDelete: () -> Unit
 ) {
     val isDone = item.reminder.isTriggered || item.tasks.all { it.isCompleted && it.title.isNotBlank() }
@@ -440,12 +453,17 @@ private fun SimpleReminderCard(
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isDone)
+            containerColor = if (isRinging)
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+            else if (isDone)
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
             else
                 MaterialTheme.colorScheme.surface
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        border = BorderStroke(
+            if (isRinging) 2.dp else 1.dp,
+            if (isRinging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -522,30 +540,44 @@ private fun SimpleReminderCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Surface(
-                    onClick = onTest,
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    modifier = Modifier.testTag("test_btn_${item.reminder.id}")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                if (isRinging) {
+                    Button(
+                        onClick = onStopAlarm,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("card_stop_alarm_btn_${item.reminder.id}")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.NotificationsActive,
-                            contentDescription = "Test Alarm",
-                            modifier = Modifier.size(13.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Test",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Text("STOP", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Surface(
+                        onClick = onTest,
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        modifier = Modifier.testTag("test_btn_${item.reminder.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "Test Alarm",
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Test",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
 

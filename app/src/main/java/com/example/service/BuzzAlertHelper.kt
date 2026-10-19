@@ -26,15 +26,22 @@ object BuzzAlertHelper {
     private val _alarmLocationTitle = MutableStateFlow("")
     val alarmLocationTitle = _alarmLocationTitle.asStateFlow()
 
+    private val _ringingReminderId = MutableStateFlow(-1L)
+    val ringingReminderId = _ringingReminderId.asStateFlow()
+
+    private var activeVibratorManager: VibratorManager? = null
+    private var activeVibrator: Vibrator? = null
+
     /**
      * Starts continuous full volume buzzing sound and repeating vibration
      * that will NOT stop until manually dismissed by user!
      */
     @Synchronized
-    fun startContinuousAlarm(context: Context, locationTitle: String = "Designated Area") {
+    fun startContinuousAlarm(context: Context, locationTitle: String = "Designated Area", reminderId: Long = -1L) {
         if (isPlaying) return
 
         try {
+            _ringingReminderId.value = reminderId
             _alarmLocationTitle.value = locationTitle
             _isAlarmActive.value = true
             isPlaying = true
@@ -86,6 +93,8 @@ object BuzzAlertHelper {
         isPlaying = false
         _isAlarmActive.value = false
         _alarmLocationTitle.value = ""
+        val finishedReminderId = _ringingReminderId.value
+        _ringingReminderId.value = -1L
 
         // 1. Stop and release MediaPlayer audio
         try {
@@ -93,6 +102,7 @@ object BuzzAlertHelper {
                 if (it.isPlaying) {
                     it.stop()
                 }
+                it.reset()
                 it.release()
             }
             activeMediaPlayer = null
@@ -106,7 +116,11 @@ object BuzzAlertHelper {
 
         // 3. Cancel any lingering notifications from notification shade
         try {
-            NotificationManagerCompat.from(context).cancelAll()
+            val notificationManager = NotificationManagerCompat.from(context)
+            if (finishedReminderId != -1L) {
+                notificationManager.cancel(finishedReminderId.toInt())
+            }
+            notificationManager.cancelAll()
         } catch (e: Exception) {
             Log.w("BuzzAlertHelper", "Error dismissing notifications: ${e.message}")
         }
@@ -117,12 +131,16 @@ object BuzzAlertHelper {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                activeVibratorManager = vm
                 vm?.defaultVibrator?.vibrate(
                     VibrationEffect.createWaveform(pattern, 0)
                 )
-            } else {
-                @Suppress("DEPRECATION")
-                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            @Suppress("DEPRECATION")
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            activeVibrator = vibrator
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
                 } else {
@@ -136,20 +154,41 @@ object BuzzAlertHelper {
     }
 
     private fun stopVibration(context: Context) {
+        // Cancel via stored active references
         try {
-            // Android 12+ (API 31+) VibratorManager
+            activeVibratorManager?.cancel()
+            activeVibratorManager?.defaultVibrator?.cancel()
+            activeVibratorManager = null
+        } catch (e: Exception) {
+            Log.w("BuzzAlertHelper", "Active VibratorManager cancel error: ${e.message}")
+            activeVibratorManager = null
+        }
+
+        try {
+            activeVibrator?.cancel()
+            activeVibrator = null
+        } catch (e: Exception) {
+            Log.w("BuzzAlertHelper", "Active Vibrator cancel error: ${e.message}")
+            activeVibrator = null
+        }
+
+        // Cancel via system services fresh lookup
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
                 vm?.cancel()
                 vm?.defaultVibrator?.cancel()
             }
+        } catch (e: Exception) {
+            Log.w("BuzzAlertHelper", "System VibratorManager cancel error: ${e.message}")
+        }
 
-            // Standard Vibrator service across all Android versions
+        try {
             @Suppress("DEPRECATION")
             val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             vibrator?.cancel()
         } catch (e: Exception) {
-            Log.w("BuzzAlertHelper", "Error cancelling vibration: ${e.message}")
+            Log.w("BuzzAlertHelper", "System Vibrator cancel error: ${e.message}")
         }
     }
 }

@@ -23,8 +23,11 @@ interface GeoTaskDao {
     @Query("SELECT * FROM geo_reminders WHERE id = :id")
     fun getReminderWithTasksById(id: Long): Flow<ReminderWithTasks?>
 
-    @Query("SELECT * FROM geo_reminders WHERE isEnabled = 1")
+    @Query("SELECT * FROM geo_reminders WHERE isEnabled = 1 AND isTriggered = 0")
     suspend fun getActiveReminders(): List<GeoReminder>
+
+    @Query("UPDATE geo_reminders SET isTriggered = 1, isEnabled = 0 WHERE id = :id")
+    suspend fun finishReminder(id: Long)
 
     @Query("SELECT * FROM geo_reminders WHERE id = :id")
     suspend fun getReminderById(id: Long): GeoReminder?
