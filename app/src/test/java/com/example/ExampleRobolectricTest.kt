@@ -44,4 +44,21 @@ class ExampleRobolectricTest {
         assertEquals(1, combined.completedTasks)
         assertEquals(2, combined.pendingTasks)
     }
+
+    @Test
+    fun `test default radius is within 1 to 10 meters and custom radius persists`() {
+        val defaultReminder = GeoReminder(
+            id = 2,
+            title = "Default 5m Radius Spot",
+            latitude = 23.79,
+            longitude = 90.41,
+            locationName = "My Spot"
+        )
+        // Default radius should be 5 meters (within 1 to 10 meter range)
+        assertEquals(5f, defaultReminder.radiusMeters)
+
+        // Manual custom radius (e.g. 7 meters or 25 meters)
+        val customReminder = defaultReminder.copy(radiusMeters = 7f)
+        assertEquals(7f, customReminder.radiusMeters)
+    }
 }

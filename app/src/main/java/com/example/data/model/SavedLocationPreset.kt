@@ -10,6 +10,6 @@ data class SavedLocationPreset(
     val name: String,
     val latitude: Double,
     val longitude: Double,
-    val defaultRadiusMeters: Float = 150f,
+    val defaultRadiusMeters: Float = 5f,
     val createdAt: Long = System.currentTimeMillis()
 )

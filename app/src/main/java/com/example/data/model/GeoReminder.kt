@@ -12,7 +12,7 @@ data class GeoReminder(
     val latitude: Double,
     val longitude: Double,
     val locationName: String,
-    val radiusMeters: Float = 100f,
+    val radiusMeters: Float = 5f,
     /**
      * "ENTER" - Trigger when entering the geographic radius
      * "EXIT" - Trigger when leaving the geographic radius

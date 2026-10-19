@@ -41,6 +41,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -82,7 +84,7 @@ private val DEFAULT_PLACES = listOf(
     PredefinedPlace("Pharmacy", 23.7990, 90.4100)
 )
 
-private val STANDARD_RADII = listOf(5, 10, 15, 20)
+private val STANDARD_RADII = listOf(1, 2, 3, 5, 8, 10)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -117,10 +119,11 @@ fun AddSimpleReminderDialog(
     }
 
     var selectedRadius by remember {
-        mutableIntStateOf(initialPreset?.defaultRadiusMeters?.toInt() ?: 10)
+        mutableIntStateOf(initialPreset?.defaultRadiusMeters?.toInt() ?: 5)
     }
-    var customRadiusText by remember { mutableStateOf("") }
-    var isCustomRadiusActive by remember { mutableStateOf(false) }
+    var manualRadiusText by remember {
+        mutableStateOf((initialPreset?.defaultRadiusMeters?.toInt() ?: 5).toString())
+    }
 
     var alsoSavePreset by remember { mutableStateOf(false) }
     var showCoordinatesDetail by remember { mutableStateOf(false) }
@@ -144,11 +147,7 @@ fun AddSimpleReminderDialog(
         }
     }
 
-    val effectiveRadius = if (isCustomRadiusActive) {
-        customRadiusText.toIntOrNull() ?: selectedRadius
-    } else {
-        selectedRadius
-    }
+    val effectiveRadius = manualRadiusText.toIntOrNull() ?: selectedRadius
 
     val hasCoordinates = currentLat != 0.0 && currentLng != 0.0
     val isReadyToSave = taskText.isNotBlank() && placeName.isNotBlank() && hasCoordinates
@@ -486,20 +485,28 @@ fun AddSimpleReminderDialog(
                     }
                 }
 
-                // 3. Proximity Radius (5m, 10m, 15m, 20m Segmented Buttons)
+                // 3. Proximity Radius (1m to 10m default range + manual custom entry)
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Proximity Radius",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Column {
+                                Text(
+                                    text = "Proximity Radius",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Default: 1 to 10 meters, or type custom",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -515,17 +522,17 @@ fun AddSimpleReminderDialog(
                             }
                         }
 
-                        // 4 Big Clean Segmented Pills: 5m, 10m, 15m, 20m
+                        // 1m to 10m Default Quick Pills
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             STANDARD_RADII.forEach { r ->
-                                val isSelected = !isCustomRadiusActive && selectedRadius == r
+                                val isSelected = selectedRadius == r && manualRadiusText == r.toString()
                                 Surface(
                                     onClick = {
                                         selectedRadius = r
-                                        isCustomRadiusActive = false
+                                        manualRadiusText = r.toString()
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     color = if (isSelected)
@@ -539,18 +546,18 @@ fun AddSimpleReminderDialog(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Column(
-                                        modifier = Modifier.padding(vertical = 10.dp),
+                                        modifier = Modifier.padding(vertical = 8.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(
                                             text = "${r}m",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
+                                            fontSize = 13.sp,
                                             color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = if (r == 10) "Default" else if (r == 5) "Tight" else if (r == 20) "Wide" else "Standard",
-                                            fontSize = 9.sp,
+                                            text = if (r == 1) "Spot" else if (r == 5) "Default" else if (r == 10) "Zone" else "Nearby",
+                                            fontSize = 8.sp,
                                             color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -558,43 +565,83 @@ fun AddSimpleReminderDialog(
                             }
                         }
 
-                        // Custom radius expander toggle if needed
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // Fine Slider across 1 to 10 meters default range
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 2.dp)
                         ) {
-                            Text(
-                                text = "Loud buzzing alert triggers when entering this radius",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            TextButton(
-                                onClick = { isCustomRadiusActive = !isCustomRadiusActive }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (isCustomRadiusActive) "Use Presets" else "Custom...",
+                                    text = "1–10m Quick Slider:",
                                     fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (effectiveRadius in 1..10) "${effectiveRadius}m (in default range)" else "${effectiveRadius}m (manual custom)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                        }
-
-                        AnimatedVisibility(visible = isCustomRadiusActive) {
-                            OutlinedTextField(
-                                value = customRadiusText,
-                                onValueChange = { customRadiusText = it.filter { ch -> ch.isDigit() } },
-                                label = { Text("Custom Radius in meters") },
-                                placeholder = { Text("e.g. 25, 50, 100") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            Slider(
+                                value = effectiveRadius.toFloat().coerceIn(1f, 10f),
+                                onValueChange = { newVal ->
+                                    val r = newVal.toInt().coerceIn(1, 10)
+                                    selectedRadius = r
+                                    manualRadiusText = r.toString()
+                                },
+                                valueRange = 1f..10f,
+                                steps = 8,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = MaterialTheme.colorScheme.primary,
+                                    activeTrackColor = MaterialTheme.colorScheme.primary
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("manual_radius_input"),
-                                shape = RoundedCornerShape(12.dp)
+                                    .testTag("radius_slider_1_to_10")
                             )
                         }
+
+                        // Always-accessible Dedicated Manual Radius Input
+                        OutlinedTextField(
+                            value = manualRadiusText,
+                            onValueChange = { input ->
+                                val filtered = input.filter { it.isDigit() }
+                                manualRadiusText = filtered
+                                val parsed = filtered.toIntOrNull()
+                                if (parsed != null && parsed > 0) {
+                                    selectedRadius = parsed
+                                }
+                            },
+                            label = { Text("Manual Radius (meters)") },
+                            placeholder = { Text("Type any custom meters (e.g. 1 to 10, or custom)") },
+                            trailingIcon = {
+                                Text(
+                                    text = "meters",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(end = 12.dp)
+                                )
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("manual_radius_input"),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        Text(
+                            text = "Loud buzzing alert triggers when entering within $effectiveRadius meter(s)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
@@ -622,7 +669,7 @@ fun AddSimpleReminderDialog(
                                         placeName.trim(),
                                         currentLat,
                                         currentLng,
-                                        effectiveRadius.toFloat().coerceAtLeast(3f),
+                                        effectiveRadius.toFloat().coerceAtLeast(1f),
                                         alsoSavePreset
                                     )
                                 }
@@ -640,6 +687,7 @@ fun AddSimpleReminderDialog(
                         }
                     }
                 }
+
             }
         }
     }
@@ -657,7 +705,9 @@ fun SaveCurrentLocationPresetDialog(
     onSave: (name: String, lat: Double, lng: Double, radius: Float) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var selectedRadius by remember { mutableIntStateOf(10) }
+    var selectedRadius by remember { mutableIntStateOf(5) }
+    var manualRadiusText by remember { mutableStateOf("5") }
+    val effectiveRadius = manualRadiusText.toIntOrNull() ?: selectedRadius
 
     var lat by remember {
         mutableDoubleStateOf(currentLocation?.latitude ?: 0.0)
@@ -815,23 +865,54 @@ fun SaveCurrentLocationPresetDialog(
                     shape = RoundedCornerShape(14.dp)
                 )
 
-                // 4 Clean Radius Pills
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Default Radius",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
+                // Radius configuration: Default 1-10m range + manual input
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Default Radius",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Default: 1 to 10 meters, or type custom",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.padding(2.dp)
+                        ) {
+                            Text(
+                                text = "${effectiveRadius}m radius",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    // 1m to 10m Default Quick Pills
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         STANDARD_RADII.forEach { r ->
-                            val isSelected = selectedRadius == r
+                            val isSelected = selectedRadius == r && manualRadiusText == r.toString()
                             Surface(
-                                onClick = { selectedRadius = r },
+                                onClick = {
+                                    selectedRadius = r
+                                    manualRadiusText = r.toString()
+                                },
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (isSelected)
                                     MaterialTheme.colorScheme.primary
@@ -843,19 +924,97 @@ fun SaveCurrentLocationPresetDialog(
                                 ),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text = "${r}m",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 10.dp)
-                                )
+                                Column(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "${r}m",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (r == 1) "Spot" else if (r == 5) "Default" else if (r == 10) "Zone" else "Nearby",
+                                        fontSize = 8.sp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
+
+                    // Fine Slider across 1 to 10 meters default range
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "1–10m Quick Slider:",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (effectiveRadius in 1..10) "${effectiveRadius}m (in default range)" else "${effectiveRadius}m (manual custom)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = effectiveRadius.toFloat().coerceIn(1f, 10f),
+                            onValueChange = { newVal ->
+                                val r = newVal.toInt().coerceIn(1, 10)
+                                selectedRadius = r
+                                manualRadiusText = r.toString()
+                            },
+                            valueRange = 1f..10f,
+                            steps = 8,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("save_spot_radius_slider_1_to_10")
+                        )
+                    }
+
+                    // Dedicated Manual Radius Input
+                    OutlinedTextField(
+                        value = manualRadiusText,
+                        onValueChange = { input ->
+                            val filtered = input.filter { it.isDigit() }
+                            manualRadiusText = filtered
+                            val parsed = filtered.toIntOrNull()
+                            if (parsed != null && parsed > 0) {
+                                selectedRadius = parsed
+                            }
+                        },
+                        label = { Text("Manual Radius (meters)") },
+                        placeholder = { Text("Type custom meters (e.g. 1 to 10, or custom)") },
+                        trailingIcon = {
+                            Text(
+                                text = "meters",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("save_spot_manual_radius_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
 
                 // Actions
@@ -875,7 +1034,7 @@ fun SaveCurrentLocationPresetDialog(
                     Button(
                         onClick = {
                             if (canSave) {
-                                onSave(name.trim(), lat, lng, selectedRadius.toFloat())
+                                onSave(name.trim(), lat, lng, effectiveRadius.toFloat().coerceAtLeast(1f))
                             }
                         },
                         enabled = canSave,

@@ -111,7 +111,7 @@ class GeoReminderRepository(private val dao: GeoTaskDao) {
 
     val allPresets: Flow<List<com.example.data.model.SavedLocationPreset>> = dao.getAllPresets()
 
-    suspend fun savePreset(name: String, lat: Double, lng: Double, radius: Float = 150f): Long {
+    suspend fun savePreset(name: String, lat: Double, lng: Double, radius: Float = 5f): Long {
         return dao.insertPreset(
             com.example.data.model.SavedLocationPreset(
                 name = name.trim(),
