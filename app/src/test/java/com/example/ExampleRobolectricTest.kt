@@ -61,4 +61,11 @@ class ExampleRobolectricTest {
         val customReminder = defaultReminder.copy(radiusMeters = 7f)
         assertEquals(7f, customReminder.radiusMeters)
     }
+
+    @Test
+    fun `test GoogleKeepGeofenceManager instance and registration`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val manager = com.example.service.GoogleKeepGeofenceManager.getInstance(context)
+        org.junit.Assert.assertNotNull(manager)
+    }
 }

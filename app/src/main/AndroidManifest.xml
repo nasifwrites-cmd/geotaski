@@ -61,6 +61,15 @@
             android:name=".receiver.NotificationActionReceiver"
             android:exported="false" />
 
+        <!-- Google Play Services Geofencing Receiver (Google Keep architecture) -->
+        <receiver
+            android:name=".receiver.GeofenceBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.action.ACTION_GEOFENCE_EVENT" />
+            </intent-filter>
+        </receiver>
+
         <!-- Auto-restart service on device boot or update -->
         <receiver
             android:name=".receiver.BootReceiver"

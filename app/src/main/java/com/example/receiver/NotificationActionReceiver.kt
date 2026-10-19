@@ -24,6 +24,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         // Stop continuous buzzing alarm immediately on any user action
         BuzzAlertHelper.stopAlarm(context)
         LocationMonitoringService.markReminderFinished(reminderId)
+        com.example.service.GoogleKeepGeofenceManager.getInstance(context).removeGeofence(reminderId)
 
         when (intent.action) {
             ACTION_STOP_ALARM, ACTION_MARK_DONE -> {

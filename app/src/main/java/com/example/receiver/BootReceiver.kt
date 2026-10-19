@@ -14,6 +14,8 @@ class BootReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON" -> {
                 // Auto-start persistent background proximity monitoring on phone restart
                 LocationMonitoringService.startService(context)
+                // Re-register all Google Keep geofences with Google Play Services
+                com.example.service.GoogleKeepGeofenceManager.getInstance(context).syncWithDatabase()
             }
         }
     }

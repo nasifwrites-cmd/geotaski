@@ -111,18 +111,18 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
     fun addReminder(task: String, placeName: String, lat: Double, lng: Double, radiusMeters: Float = 10f) {
         if (task.isBlank() || placeName.isBlank()) return
         viewModelScope.launch {
-            repository.insertReminderWithTasks(
-                GeoReminder(
-                    title = task.trim(),
-                    latitude = lat,
-                    longitude = lng,
-                    locationName = placeName.trim(),
-                    radiusMeters = radiusMeters,
-                    triggerType = "ENTER",
-                    isEnabled = true
-                ),
-                listOf(task.trim())
+            val reminder = GeoReminder(
+                title = task.trim(),
+                latitude = lat,
+                longitude = lng,
+                locationName = placeName.trim(),
+                radiusMeters = radiusMeters,
+                triggerType = "ENTER",
+                isEnabled = true
             )
+            val newId = repository.insertReminderWithTasks(reminder, listOf(task.trim()))
+            com.example.service.GoogleKeepGeofenceManager.getInstance(getApplication())
+                .registerGeofence(reminder.copy(id = newId))
             _isAddOpen.value = false
         }
     }
@@ -132,6 +132,8 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
             val isNowTriggered = !item.reminder.isTriggered
             if (isNowTriggered) {
                 // User marked task as done
+                com.example.service.GoogleKeepGeofenceManager.getInstance(getApplication())
+                    .removeGeofence(item.reminder.id)
                 LocationMonitoringService.markReminderFinished(item.reminder.id)
                 repository.finishReminder(item.reminder.id)
                 stopAlarmAndFinish(item.reminder.id)
@@ -143,12 +145,16 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
                 item.tasks.forEach {
                     repository.setTaskCompleted(it.id, false)
                 }
+                com.example.service.GoogleKeepGeofenceManager.getInstance(getApplication())
+                    .registerGeofence(item.reminder.copy(isTriggered = false, isEnabled = true))
             }
         }
     }
 
     fun deleteReminder(item: ReminderWithTasks) {
         viewModelScope.launch {
+            com.example.service.GoogleKeepGeofenceManager.getInstance(getApplication())
+                .removeGeofence(item.reminder.id)
             LocationMonitoringService.markReminderFinished(item.reminder.id)
             stopAlarmAndFinish(item.reminder.id)
             repository.deleteReminder(item.reminder)
@@ -173,6 +179,8 @@ class GeoTaskViewModel(application: Application) : AndroidViewModel(application)
         }
         BuzzAlertHelper.stopAlarm(getApplication())
         if (targetId != -1L) {
+            com.example.service.GoogleKeepGeofenceManager.getInstance(getApplication())
+                .removeGeofence(targetId)
             LocationMonitoringService.markReminderFinished(targetId)
             viewModelScope.launch {
                 repository.finishReminder(targetId)

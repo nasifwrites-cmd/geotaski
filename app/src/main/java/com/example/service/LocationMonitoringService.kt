@@ -300,6 +300,8 @@ class LocationMonitoringService : Service() {
     }
 
     private suspend fun triggerNotificationForReminder(reminder: GeoReminder) {
+        // Prevent duplicate trigger by Google Play Services geofence
+        com.example.service.GoogleKeepGeofenceManager.getInstance(this).removeGeofence(reminder.id)
         val repository = GeoTaskApplication.instance.repository
         val tasks = repository.getTasksForReminder(reminder.id)
         NotificationHelper.showProximityNotification(this, reminder, tasks)

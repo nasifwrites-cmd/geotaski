@@ -22,6 +22,7 @@ class GeoTaskApplication : Application() {
         repository = GeoReminderRepository(database.geoTaskDao())
 
         createNotificationChannels()
+        com.example.service.GoogleKeepGeofenceManager.getInstance(this).syncWithDatabase()
     }
 
     private fun createNotificationChannels() {
